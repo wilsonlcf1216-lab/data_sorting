@@ -100,6 +100,40 @@
                     </div>
                 </div>
             </div>
+
+            <div id="expiryPanel" class="hidden flex-col gap-3 bg-amber-50 p-3 rounded-lg border border-amber-200 shadow-inner">
+                <div class="flex flex-col lg:flex-row lg:items-end gap-3">
+                    <div class="flex flex-col gap-1 min-w-[220px]">
+                        <label for="expiryDobColumn" class="text-xs font-bold uppercase tracking-wider text-amber-800">DOB 欄位</label>
+                        <select id="expiryDobColumn" class="px-3 py-2 border border-amber-300 rounded-lg bg-white focus:outline-none focus:border-amber-500">
+                            <option value="">請選擇日期欄位</option>
+                        </select>
+                    </div>
+                    <div class="flex flex-col gap-1">
+                        <label for="expiryTargetDate" class="text-xs font-bold uppercase tracking-wider text-amber-800">查核日期</label>
+                        <input type="date" id="expiryTargetDate" class="px-3 py-2 border border-amber-300 rounded-lg bg-white focus:outline-none focus:border-amber-500">
+                    </div>
+                    <div class="flex flex-col gap-1 w-28">
+                        <label for="expiryYearsInput" class="text-xs font-bold uppercase tracking-wider text-amber-800">加幾多年</label>
+                        <input type="number" id="expiryYearsInput" value="13" min="1" class="px-3 py-2 border border-amber-300 rounded-lg bg-white focus:outline-none focus:border-amber-500 text-center">
+                    </div>
+                    <div class="flex gap-2 flex-wrap">
+                        <button id="runExpiryBtn" class="bg-amber-600 hover:bg-amber-700 text-white px-4 py-2 rounded-lg shadow-sm font-medium transition-colors">
+                            分析到期
+                        </button>
+                        <button id="expiryAllBtn" class="bg-white hover:bg-amber-100 text-amber-800 border border-amber-300 px-4 py-2 rounded-lg shadow-sm font-medium transition-colors">
+                            全部
+                        </button>
+                        <button id="expiryExpiredBtn" class="bg-white hover:bg-red-50 text-red-700 border border-red-200 px-4 py-2 rounded-lg shadow-sm font-medium transition-colors">
+                            已過期
+                        </button>
+                        <button id="expiryActiveBtn" class="bg-white hover:bg-emerald-50 text-emerald-700 border border-emerald-200 px-4 py-2 rounded-lg shadow-sm font-medium transition-colors">
+                            未過期
+                        </button>
+                    </div>
+                </div>
+                <div id="expirySummary" class="hidden text-sm bg-white border border-amber-200 rounded-lg px-4 py-3 text-gray-700"></div>
+            </div>
         </div>
     </header>
 
@@ -171,6 +205,13 @@
         let currentWorksheetName = null;
         let activeSummaryCol = null;
         let summaryCounts = [];
+        let expiryAnalysis = {
+            dobColumn: '',
+            targetDate: '',
+            yearsToAdd: 13,
+            mode: 'all',
+            stats: null
+        };
         
         // DOM Elements
         const fileInput = document.getElementById('fileInput');
@@ -189,6 +230,15 @@
         const loaderArea = document.getElementById('loaderArea');
         const summaryModal = document.getElementById('summaryModal');
         const summaryContent = document.getElementById('summaryContent');
+        const expiryPanel = document.getElementById('expiryPanel');
+        const expiryDobColumn = document.getElementById('expiryDobColumn');
+        const expiryTargetDate = document.getElementById('expiryTargetDate');
+        const expiryYearsInput = document.getElementById('expiryYearsInput');
+        const runExpiryBtn = document.getElementById('runExpiryBtn');
+        const expiryAllBtn = document.getElementById('expiryAllBtn');
+        const expiryExpiredBtn = document.getElementById('expiryExpiredBtn');
+        const expiryActiveBtn = document.getElementById('expiryActiveBtn');
+        const expirySummary = document.getElementById('expirySummary');
 
         // Render limits to prevent browser crash on huge files
         const MAX_RENDER_ROWS = 2000;
@@ -197,6 +247,10 @@
         fileInput.addEventListener('change', handleFileUpload);
         headerRowInput.addEventListener('change', handleHeaderRowChange);
         clearBtn.addEventListener('click', clearAll);
+        runExpiryBtn.addEventListener('click', runExpiryAnalysis);
+        expiryAllBtn.addEventListener('click', () => setExpiryMode('all'));
+        expiryExpiredBtn.addEventListener('click', () => setExpiryMode('expired'));
+        expiryActiveBtn.addEventListener('click', () => setExpiryMode('active'));
 
         function handleHeaderRowChange() {
             if (currentWorkbook && currentWorksheetName) {
@@ -292,9 +346,12 @@
                 
                 // Reset states
                 filters = {};
+                explicitExclusions = {};
                 sorts = [];
+                resetExpiryAnalysis();
                 
                 buildTableHeaders();
+                populateExpiryColumnOptions();
                 processDataAndRender();
                 
                 tableContainer.classList.remove('hidden');
@@ -511,9 +568,241 @@
             return String(cellValue).toLowerCase().includes(filterVal);
         }
 
+        function resetExpiryAnalysis() {
+            expiryAnalysis = {
+                dobColumn: '',
+                targetDate: '',
+                yearsToAdd: 13,
+                mode: 'all',
+                stats: null
+            };
+
+            if (expiryDobColumn) expiryDobColumn.value = '';
+            if (expiryTargetDate) expiryTargetDate.value = '';
+            if (expiryYearsInput) expiryYearsInput.value = '13';
+            updateExpiryUI();
+        }
+
+        function detectDefaultDobColumn() {
+            const dobKeywords = ['date of birth', 'dob', 'birth', 'born'];
+            return columns.find(col => dobKeywords.some(keyword => col.toLowerCase().includes(keyword))) || '';
+        }
+
+        function populateExpiryColumnOptions() {
+            expiryDobColumn.innerHTML = '<option value="">請選擇日期欄位</option>';
+
+            columns.forEach(col => {
+                const option = document.createElement('option');
+                option.value = col;
+                option.textContent = col;
+                expiryDobColumn.appendChild(option);
+            });
+
+            const defaultDobColumn = detectDefaultDobColumn();
+            if (defaultDobColumn) {
+                expiryDobColumn.value = defaultDobColumn;
+                expiryAnalysis.dobColumn = defaultDobColumn;
+            }
+
+            expiryPanel.classList.remove('hidden');
+            expiryPanel.classList.add('flex');
+            updateExpiryUI();
+        }
+
+        function normalizeDate(date) {
+            return new Date(date.getFullYear(), date.getMonth(), date.getDate());
+        }
+
+        function parseFlexibleDate(value) {
+            if (value == null || value === '') return null;
+
+            if (value instanceof Date && !isNaN(value.getTime())) {
+                return normalizeDate(value);
+            }
+
+            if (typeof value === 'number' && isFinite(value)) {
+                // Support raw Excel serial dates if they appear in the dataset.
+                const excelEpoch = new Date(Date.UTC(1899, 11, 30));
+                const parsed = new Date(excelEpoch.getTime() + value * 86400000);
+                return isNaN(parsed.getTime()) ? null : normalizeDate(parsed);
+            }
+
+            const text = String(value).trim();
+            if (!text) return null;
+
+            const dayFirstMatch = text.match(/^(\d{1,2})[\/\-\.](\d{1,2})[\/\-\.](\d{4})$/);
+            if (dayFirstMatch) {
+                const day = parseInt(dayFirstMatch[1], 10);
+                const month = parseInt(dayFirstMatch[2], 10);
+                const year = parseInt(dayFirstMatch[3], 10);
+                const parsed = new Date(year, month - 1, day);
+                if (parsed.getFullYear() === year && parsed.getMonth() === month - 1 && parsed.getDate() === day) {
+                    return parsed;
+                }
+            }
+
+            const yearFirstMatch = text.match(/^(\d{4})[\/\-\.](\d{1,2})[\/\-\.](\d{1,2})$/);
+            if (yearFirstMatch) {
+                const year = parseInt(yearFirstMatch[1], 10);
+                const month = parseInt(yearFirstMatch[2], 10);
+                const day = parseInt(yearFirstMatch[3], 10);
+                const parsed = new Date(year, month - 1, day);
+                if (parsed.getFullYear() === year && parsed.getMonth() === month - 1 && parsed.getDate() === day) {
+                    return parsed;
+                }
+            }
+
+            const fallback = new Date(text);
+            return isNaN(fallback.getTime()) ? null : normalizeDate(fallback);
+        }
+
+        function addYearsPreservingDate(date, yearsToAdd) {
+            const year = date.getFullYear() + yearsToAdd;
+            const month = date.getMonth();
+            const day = date.getDate();
+            const result = new Date(year, month, day);
+
+            // Handle Feb 29 birthdays in non-leap years by using Feb 28.
+            if (month === 1 && day === 29 && (result.getMonth() !== month || result.getDate() !== day)) {
+                return new Date(year, 1, 28);
+            }
+
+            return result;
+        }
+
+        function getExpiryStatus(row) {
+            if (!expiryAnalysis.dobColumn || !expiryAnalysis.targetDate) {
+                return null;
+            }
+
+            const dob = parseFlexibleDate(row[expiryAnalysis.dobColumn]);
+            const targetDate = parseFlexibleDate(expiryAnalysis.targetDate);
+            const yearsToAdd = parseInt(expiryAnalysis.yearsToAdd, 10);
+
+            if (!dob || !targetDate || isNaN(yearsToAdd) || yearsToAdd < 1) {
+                return 'invalid';
+            }
+
+            const expiryDate = addYearsPreservingDate(dob, yearsToAdd);
+            return expiryDate <= targetDate ? 'expired' : 'active';
+        }
+
+        function buildExpiryStats(data) {
+            if (!expiryAnalysis.dobColumn || !expiryAnalysis.targetDate) {
+                return null;
+            }
+
+            const stats = {
+                checkedRows: data.length,
+                expiredCount: 0,
+                activeCount: 0,
+                invalidCount: 0
+            };
+
+            data.forEach(row => {
+                const status = getExpiryStatus(row);
+                if (status === 'expired') {
+                    stats.expiredCount += 1;
+                } else if (status === 'active') {
+                    stats.activeCount += 1;
+                } else {
+                    stats.invalidCount += 1;
+                }
+            });
+
+            return stats;
+        }
+
+        function updateExpiryUI() {
+            const hasConfig = expiryAnalysis.dobColumn && expiryAnalysis.targetDate;
+            const stats = expiryAnalysis.stats;
+
+            if (!hasConfig || !stats) {
+                expirySummary.classList.add('hidden');
+                expirySummary.innerHTML = '';
+            } else {
+                const modeLabel = expiryAnalysis.mode === 'expired'
+                    ? '現正只顯示已過期 item。'
+                    : expiryAnalysis.mode === 'active'
+                        ? '現正只顯示未過期 item。'
+                        : '現正顯示全部 item。';
+
+                expirySummary.innerHTML = `
+                    <div class="flex flex-wrap gap-x-6 gap-y-2 items-center">
+                        <span><strong>DOB 欄位:</strong> ${escapeHtml(expiryAnalysis.dobColumn)}</span>
+                        <span><strong>查核日期:</strong> ${escapeHtml(expiryAnalysis.targetDate)}</span>
+                        <span><strong>規則:</strong> DOB + ${escapeHtml(String(expiryAnalysis.yearsToAdd))} 年</span>
+                    </div>
+                    <div class="mt-2 flex flex-wrap gap-x-6 gap-y-2 text-sm">
+                        <span><strong>已檢查:</strong> ${stats.checkedRows.toLocaleString()}</span>
+                        <span class="text-red-700"><strong>已過期:</strong> ${stats.expiredCount.toLocaleString()}</span>
+                        <span class="text-emerald-700"><strong>未過期:</strong> ${stats.activeCount.toLocaleString()}</span>
+                        <span class="text-gray-500"><strong>DOB 無效:</strong> ${stats.invalidCount.toLocaleString()}</span>
+                    </div>
+                    <div class="mt-2 text-xs text-gray-500">${modeLabel} 上面數字會跟你目前篩選後嘅資料一齊更新。</div>
+                `;
+                expirySummary.classList.remove('hidden');
+            }
+
+            updateExpiryModeButtons();
+        }
+
+        function updateExpiryModeButtons() {
+            const modeClassMap = {
+                all: 'bg-amber-600 text-white border-amber-600',
+                expired: 'bg-red-600 text-white border-red-600',
+                active: 'bg-emerald-600 text-white border-emerald-600'
+            };
+
+            [
+                [expiryAllBtn, 'all', 'bg-white text-amber-800 border-amber-300'],
+                [expiryExpiredBtn, 'expired', 'bg-white text-red-700 border-red-200'],
+                [expiryActiveBtn, 'active', 'bg-white text-emerald-700 border-emerald-200']
+            ].forEach(([button, mode, inactiveClasses]) => {
+                button.className = `px-4 py-2 rounded-lg shadow-sm font-medium transition-colors border ${expiryAnalysis.mode === mode ? modeClassMap[mode] : inactiveClasses}`;
+            });
+        }
+
+        function runExpiryAnalysis() {
+            const dobColumn = expiryDobColumn.value;
+            const targetDate = expiryTargetDate.value;
+            const yearsToAdd = parseInt(expiryYearsInput.value, 10);
+
+            if (!dobColumn) {
+                showMessage('請先揀 DOB / 日期欄位。', true);
+                return;
+            }
+
+            if (!targetDate) {
+                showMessage('請先揀你想查核嘅日期。', true);
+                return;
+            }
+
+            if (isNaN(yearsToAdd) || yearsToAdd < 1) {
+                showMessage('加幾多年最少要係 1。', true);
+                return;
+            }
+
+            expiryAnalysis.dobColumn = dobColumn;
+            expiryAnalysis.targetDate = targetDate;
+            expiryAnalysis.yearsToAdd = yearsToAdd;
+
+            processDataAndRender();
+        }
+
+        function setExpiryMode(mode) {
+            if (!expiryAnalysis.dobColumn || !expiryAnalysis.targetDate) {
+                showMessage('請先做一次到期分析。', true);
+                return;
+            }
+
+            expiryAnalysis.mode = mode;
+            processDataAndRender();
+        }
+
         function processDataAndRender() {
             // 1. Apply Filters & Exclusions
-            processedData = rawData.filter(row => {
+            let baseFilteredData = rawData.filter(row => {
                 // Apply typed text/logic filters
                 for (const [col, filterVal] of Object.entries(filters)) {
                     if (!passesFilter(row, col, filterVal)) {
@@ -533,6 +822,15 @@
                 
                 return true;
             });
+
+            expiryAnalysis.stats = buildExpiryStats(baseFilteredData);
+            let dataToDisplay = baseFilteredData;
+
+            if (expiryAnalysis.mode === 'expired' || expiryAnalysis.mode === 'active') {
+                dataToDisplay = baseFilteredData.filter(row => getExpiryStatus(row) === expiryAnalysis.mode);
+            }
+
+            processedData = dataToDisplay;
 
             // 2. Apply Chained Multi-Sort
             if (sorts.length > 0) {
@@ -562,6 +860,7 @@
             }
 
             // 3. Render DOM
+            updateExpiryUI();
             renderTableBody(processedData);
         }
 
@@ -771,6 +1070,7 @@
             filters = {};
             explicitExclusions = {};
             sorts = [];
+            resetExpiryAnalysis();
             
             // Clear input fields
             columns.forEach(col => {
