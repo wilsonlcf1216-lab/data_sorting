@@ -130,6 +130,21 @@
                         <button id="expiryActiveBtn" class="bg-white hover:bg-emerald-50 text-emerald-700 border border-emerald-200 px-4 py-2 rounded-lg shadow-sm font-medium transition-colors">
                             未過期
                         </button>
+                        <button id="expiryUpcoming30Btn" class="bg-white hover:bg-orange-50 text-orange-700 border border-orange-200 px-4 py-2 rounded-lg shadow-sm font-medium transition-colors">
+                            30日內
+                        </button>
+                        <button id="expiryUpcoming60Btn" class="bg-white hover:bg-orange-50 text-orange-700 border border-orange-200 px-4 py-2 rounded-lg shadow-sm font-medium transition-colors">
+                            60日內
+                        </button>
+                        <button id="expiryUpcoming90Btn" class="bg-white hover:bg-orange-50 text-orange-700 border border-orange-200 px-4 py-2 rounded-lg shadow-sm font-medium transition-colors">
+                            90日內
+                        </button>
+                        <button id="exportExpiredExcelBtn" class="bg-white hover:bg-blue-50 text-blue-700 border border-blue-200 px-4 py-2 rounded-lg shadow-sm font-medium transition-colors">
+                            匯出已過期 Excel
+                        </button>
+                        <button id="exportExpiredCsvBtn" class="bg-white hover:bg-sky-50 text-sky-700 border border-sky-200 px-4 py-2 rounded-lg shadow-sm font-medium transition-colors">
+                            匯出已過期 CSV
+                        </button>
                     </div>
                 </div>
                 <div id="expirySummary" class="hidden text-sm bg-white border border-amber-200 rounded-lg px-4 py-3 text-gray-700"></div>
@@ -210,7 +225,8 @@
             targetDate: '',
             yearsToAdd: 13,
             mode: 'all',
-            stats: null
+            stats: null,
+            sourceData: []
         };
         
         // DOM Elements
@@ -238,6 +254,11 @@
         const expiryAllBtn = document.getElementById('expiryAllBtn');
         const expiryExpiredBtn = document.getElementById('expiryExpiredBtn');
         const expiryActiveBtn = document.getElementById('expiryActiveBtn');
+        const expiryUpcoming30Btn = document.getElementById('expiryUpcoming30Btn');
+        const expiryUpcoming60Btn = document.getElementById('expiryUpcoming60Btn');
+        const expiryUpcoming90Btn = document.getElementById('expiryUpcoming90Btn');
+        const exportExpiredExcelBtn = document.getElementById('exportExpiredExcelBtn');
+        const exportExpiredCsvBtn = document.getElementById('exportExpiredCsvBtn');
         const expirySummary = document.getElementById('expirySummary');
 
         // Render limits to prevent browser crash on huge files
@@ -251,6 +272,11 @@
         expiryAllBtn.addEventListener('click', () => setExpiryMode('all'));
         expiryExpiredBtn.addEventListener('click', () => setExpiryMode('expired'));
         expiryActiveBtn.addEventListener('click', () => setExpiryMode('active'));
+        expiryUpcoming30Btn.addEventListener('click', () => setExpiryMode('upcoming30'));
+        expiryUpcoming60Btn.addEventListener('click', () => setExpiryMode('upcoming60'));
+        expiryUpcoming90Btn.addEventListener('click', () => setExpiryMode('upcoming90'));
+        exportExpiredExcelBtn.addEventListener('click', () => exportExpiredData('xlsx'));
+        exportExpiredCsvBtn.addEventListener('click', () => exportExpiredData('csv'));
 
         function handleHeaderRowChange() {
             if (currentWorkbook && currentWorksheetName) {
@@ -407,9 +433,33 @@
                 th.innerHTML = headerContent + filterContent;
                 tr.appendChild(th);
             });
+
+            if (shouldShowExpiryColumn()) {
+                const expiryTh = document.createElement('th');
+                expiryTh.className = 'px-4 py-3 text-left border-b border-gray-300 align-top min-w-[180px]';
+                expiryTh.innerHTML = `
+                    <div class="flex justify-between items-center mb-2">
+                        <div class="flex items-center gap-2 truncate">
+                            <span class="bg-amber-100 text-amber-800 font-mono px-1.5 py-0.5 rounded text-[10px] shadow-sm border border-amber-200 flex-shrink-0">EXP</span>
+                            <span class="font-semibold text-gray-700 truncate">到期狀態</span>
+                        </div>
+                    </div>
+                    <div class="text-xs px-2 py-1.5 border border-amber-200 rounded bg-amber-50 text-amber-700">
+                        按 DOB + 年期 自動計算
+                    </div>
+                `;
+                tr.appendChild(expiryTh);
+            }
             
             tableHead.innerHTML = '';
             tableHead.appendChild(tr);
+
+            columns.forEach(col => {
+                const input = document.getElementById(`filter-${cssSafe(col)}`);
+                if (input && filters[col]) {
+                    input.value = filters[col];
+                }
+            });
         }
 
         function handleFilterInput(col, value) {
@@ -574,7 +624,8 @@
                 targetDate: '',
                 yearsToAdd: 13,
                 mode: 'all',
-                stats: null
+                stats: null,
+                sourceData: []
             };
 
             if (expiryDobColumn) expiryDobColumn.value = '';
@@ -670,7 +721,21 @@
             return result;
         }
 
-        function getExpiryStatus(row) {
+        function formatDateForDisplay(date) {
+            const year = date.getFullYear();
+            const month = String(date.getMonth() + 1).padStart(2, '0');
+            const day = String(date.getDate()).padStart(2, '0');
+            return `${day}-${month}-${year}`;
+        }
+
+        function formatDateForExport(date) {
+            const year = date.getFullYear();
+            const month = String(date.getMonth() + 1).padStart(2, '0');
+            const day = String(date.getDate()).padStart(2, '0');
+            return `${year}-${month}-${day}`;
+        }
+
+        function getExpiryDetails(row) {
             if (!expiryAnalysis.dobColumn || !expiryAnalysis.targetDate) {
                 return null;
             }
@@ -680,11 +745,71 @@
             const yearsToAdd = parseInt(expiryAnalysis.yearsToAdd, 10);
 
             if (!dob || !targetDate || isNaN(yearsToAdd) || yearsToAdd < 1) {
-                return 'invalid';
+                return {
+                    statusKey: 'invalid',
+                    statusLabel: 'DOB 無效',
+                    groupKey: 'invalid',
+                    expiryDate: null,
+                    expiryDateDisplay: '',
+                    daysUntilExpiry: null
+                };
             }
 
             const expiryDate = addYearsPreservingDate(dob, yearsToAdd);
-            return expiryDate <= targetDate ? 'expired' : 'active';
+            const daysUntilExpiry = Math.round((expiryDate.getTime() - targetDate.getTime()) / 86400000);
+
+            if (expiryDate <= targetDate) {
+                return {
+                    statusKey: 'expired',
+                    statusLabel: '已過期',
+                    groupKey: 'expired',
+                    expiryDate,
+                    expiryDateDisplay: formatDateForDisplay(expiryDate),
+                    daysUntilExpiry
+                };
+            }
+
+            if (daysUntilExpiry <= 30) {
+                return {
+                    statusKey: 'upcoming30',
+                    statusLabel: '即將過期 (30日內)',
+                    groupKey: 'active',
+                    expiryDate,
+                    expiryDateDisplay: formatDateForDisplay(expiryDate),
+                    daysUntilExpiry
+                };
+            }
+
+            if (daysUntilExpiry <= 60) {
+                return {
+                    statusKey: 'upcoming60',
+                    statusLabel: '即將過期 (60日內)',
+                    groupKey: 'active',
+                    expiryDate,
+                    expiryDateDisplay: formatDateForDisplay(expiryDate),
+                    daysUntilExpiry
+                };
+            }
+
+            if (daysUntilExpiry <= 90) {
+                return {
+                    statusKey: 'upcoming90',
+                    statusLabel: '即將過期 (90日內)',
+                    groupKey: 'active',
+                    expiryDate,
+                    expiryDateDisplay: formatDateForDisplay(expiryDate),
+                    daysUntilExpiry
+                };
+            }
+
+            return {
+                statusKey: 'active',
+                statusLabel: '未過期',
+                groupKey: 'active',
+                expiryDate,
+                expiryDateDisplay: formatDateForDisplay(expiryDate),
+                daysUntilExpiry
+            };
         }
 
         function buildExpiryStats(data) {
@@ -696,21 +821,64 @@
                 checkedRows: data.length,
                 expiredCount: 0,
                 activeCount: 0,
-                invalidCount: 0
+                invalidCount: 0,
+                upcoming30Count: 0,
+                upcoming60Count: 0,
+                upcoming90Count: 0
             };
 
             data.forEach(row => {
-                const status = getExpiryStatus(row);
-                if (status === 'expired') {
-                    stats.expiredCount += 1;
-                } else if (status === 'active') {
-                    stats.activeCount += 1;
-                } else {
+                const details = getExpiryDetails(row);
+                if (!details || details.statusKey === 'invalid') {
                     stats.invalidCount += 1;
+                    return;
+                }
+
+                if (details.statusKey === 'expired') {
+                    stats.expiredCount += 1;
+                    return;
+                }
+
+                stats.activeCount += 1;
+
+                if (details.statusKey === 'upcoming30') {
+                    stats.upcoming30Count += 1;
+                    stats.upcoming60Count += 1;
+                    stats.upcoming90Count += 1;
+                } else if (details.statusKey === 'upcoming60') {
+                    stats.upcoming60Count += 1;
+                    stats.upcoming90Count += 1;
+                } else if (details.statusKey === 'upcoming90') {
+                    stats.upcoming90Count += 1;
                 }
             });
 
             return stats;
+        }
+
+        function shouldShowExpiryColumn() {
+            return Boolean(expiryAnalysis.dobColumn && expiryAnalysis.targetDate);
+        }
+
+        function matchesExpiryMode(details) {
+            if (!details) return true;
+
+            if (expiryAnalysis.mode === 'all') return true;
+            if (expiryAnalysis.mode === 'expired') return details.statusKey === 'expired';
+            if (expiryAnalysis.mode === 'active') return details.groupKey === 'active';
+            if (expiryAnalysis.mode === 'upcoming30') return details.statusKey === 'upcoming30';
+            if (expiryAnalysis.mode === 'upcoming60') return details.statusKey === 'upcoming30' || details.statusKey === 'upcoming60';
+            if (expiryAnalysis.mode === 'upcoming90') return details.statusKey === 'upcoming30' || details.statusKey === 'upcoming60' || details.statusKey === 'upcoming90';
+            return true;
+        }
+
+        function getExpiryBadgeClass(statusKey) {
+            if (statusKey === 'expired') return 'bg-red-50 text-red-700 border-red-200';
+            if (statusKey === 'upcoming30') return 'bg-orange-100 text-orange-800 border-orange-300';
+            if (statusKey === 'upcoming60') return 'bg-orange-50 text-orange-700 border-orange-200';
+            if (statusKey === 'upcoming90') return 'bg-amber-50 text-amber-700 border-amber-200';
+            if (statusKey === 'active') return 'bg-emerald-50 text-emerald-700 border-emerald-200';
+            return 'bg-gray-50 text-gray-500 border-gray-200';
         }
 
         function updateExpiryUI() {
@@ -721,11 +889,15 @@
                 expirySummary.classList.add('hidden');
                 expirySummary.innerHTML = '';
             } else {
-                const modeLabel = expiryAnalysis.mode === 'expired'
-                    ? '現正只顯示已過期 item。'
-                    : expiryAnalysis.mode === 'active'
-                        ? '現正只顯示未過期 item。'
-                        : '現正顯示全部 item。';
+                const modeLabels = {
+                    all: '現正顯示全部 item。',
+                    expired: '現正只顯示已過期 item。',
+                    active: '現正只顯示未過期 item。',
+                    upcoming30: '現正只顯示 30 日內即將過期 item。',
+                    upcoming60: '現正只顯示 60 日內即將過期 item。',
+                    upcoming90: '現正只顯示 90 日內即將過期 item。'
+                };
+                const modeLabel = modeLabels[expiryAnalysis.mode] || modeLabels.all;
 
                 expirySummary.innerHTML = `
                     <div class="flex flex-wrap gap-x-6 gap-y-2 items-center">
@@ -736,7 +908,10 @@
                     <div class="mt-2 flex flex-wrap gap-x-6 gap-y-2 text-sm">
                         <span><strong>已檢查:</strong> ${stats.checkedRows.toLocaleString()}</span>
                         <span class="text-red-700"><strong>已過期:</strong> ${stats.expiredCount.toLocaleString()}</span>
-                        <span class="text-emerald-700"><strong>未過期:</strong> ${stats.activeCount.toLocaleString()}</span>
+                        <span class="text-emerald-700"><strong>未過期總數:</strong> ${stats.activeCount.toLocaleString()}</span>
+                        <span class="text-orange-700"><strong>30日內:</strong> ${stats.upcoming30Count.toLocaleString()}</span>
+                        <span class="text-orange-700"><strong>60日內:</strong> ${stats.upcoming60Count.toLocaleString()}</span>
+                        <span class="text-amber-700"><strong>90日內:</strong> ${stats.upcoming90Count.toLocaleString()}</span>
                         <span class="text-gray-500"><strong>DOB 無效:</strong> ${stats.invalidCount.toLocaleString()}</span>
                     </div>
                     <div class="mt-2 text-xs text-gray-500">${modeLabel} 上面數字會跟你目前篩選後嘅資料一齊更新。</div>
@@ -751,13 +926,19 @@
             const modeClassMap = {
                 all: 'bg-amber-600 text-white border-amber-600',
                 expired: 'bg-red-600 text-white border-red-600',
-                active: 'bg-emerald-600 text-white border-emerald-600'
+                active: 'bg-emerald-600 text-white border-emerald-600',
+                upcoming30: 'bg-orange-600 text-white border-orange-600',
+                upcoming60: 'bg-orange-600 text-white border-orange-600',
+                upcoming90: 'bg-orange-600 text-white border-orange-600'
             };
 
             [
                 [expiryAllBtn, 'all', 'bg-white text-amber-800 border-amber-300'],
                 [expiryExpiredBtn, 'expired', 'bg-white text-red-700 border-red-200'],
-                [expiryActiveBtn, 'active', 'bg-white text-emerald-700 border-emerald-200']
+                [expiryActiveBtn, 'active', 'bg-white text-emerald-700 border-emerald-200'],
+                [expiryUpcoming30Btn, 'upcoming30', 'bg-white text-orange-700 border-orange-200'],
+                [expiryUpcoming60Btn, 'upcoming60', 'bg-white text-orange-700 border-orange-200'],
+                [expiryUpcoming90Btn, 'upcoming90', 'bg-white text-orange-700 border-orange-200']
             ].forEach(([button, mode, inactiveClasses]) => {
                 button.className = `px-4 py-2 rounded-lg shadow-sm font-medium transition-colors border ${expiryAnalysis.mode === mode ? modeClassMap[mode] : inactiveClasses}`;
             });
@@ -787,6 +968,7 @@
             expiryAnalysis.targetDate = targetDate;
             expiryAnalysis.yearsToAdd = yearsToAdd;
 
+            buildTableHeaders();
             processDataAndRender();
         }
 
@@ -798,6 +980,46 @@
 
             expiryAnalysis.mode = mode;
             processDataAndRender();
+        }
+
+        function buildExpiredExportRows() {
+            return expiryAnalysis.sourceData
+                .map(row => {
+                    const details = getExpiryDetails(row);
+                    return { row, details };
+                })
+                .filter(item => item.details && item.details.statusKey === 'expired')
+                .map(item => {
+                    const exportRow = {};
+                    columns.forEach(col => {
+                        exportRow[col] = item.row[col] !== undefined ? item.row[col] : '';
+                    });
+                    exportRow['到期日'] = item.details.expiryDate ? formatDateForExport(item.details.expiryDate) : '';
+                    exportRow['到期狀態'] = item.details.statusLabel;
+                    return exportRow;
+                });
+        }
+
+        function exportExpiredData(type) {
+            if (!expiryAnalysis.dobColumn || !expiryAnalysis.targetDate) {
+                showMessage('請先做一次到期分析，先可以匯出已過期 item。', true);
+                return;
+            }
+
+            const expiredRows = buildExpiredExportRows();
+            if (expiredRows.length === 0) {
+                showMessage('目前篩選結果入面冇已過期 item 可以匯出。', true);
+                return;
+            }
+
+            const worksheet = XLSX.utils.json_to_sheet(expiredRows);
+            const workbook = XLSX.utils.book_new();
+            XLSX.utils.book_append_sheet(workbook, worksheet, 'Expired Items');
+
+            const safeDate = expiryAnalysis.targetDate.replace(/[^0-9]/g, '');
+            const filename = `expired_items_${safeDate}.${type}`;
+            XLSX.writeFile(workbook, filename, type === 'csv' ? { bookType: 'csv' } : {});
+            showMessage(`已匯出 ${expiredRows.length.toLocaleString()} 個已過期 item 去 ${filename}`);
         }
 
         function processDataAndRender() {
@@ -824,10 +1046,14 @@
             });
 
             expiryAnalysis.stats = buildExpiryStats(baseFilteredData);
+            expiryAnalysis.sourceData = baseFilteredData;
             let dataToDisplay = baseFilteredData;
 
-            if (expiryAnalysis.mode === 'expired' || expiryAnalysis.mode === 'active') {
-                dataToDisplay = baseFilteredData.filter(row => getExpiryStatus(row) === expiryAnalysis.mode);
+            if (shouldShowExpiryColumn() && expiryAnalysis.mode !== 'all') {
+                dataToDisplay = baseFilteredData.filter(row => {
+                    const details = getExpiryDetails(row);
+                    return matchesExpiryMode(details);
+                });
             }
 
             processedData = dataToDisplay;
@@ -877,13 +1103,27 @@
                     const cellValue = row[col] !== undefined ? row[col] : '';
                     html += `<td class="px-4 py-2 text-gray-600 border-b border-gray-100 max-w-xs truncate" title="${escapeHtml(String(cellValue))}">${escapeHtml(String(cellValue))}</td>`;
                 });
+                if (shouldShowExpiryColumn()) {
+                    const details = getExpiryDetails(row);
+                    const statusLabel = details ? details.statusLabel : '';
+                    const expiryDateText = details && details.expiryDateDisplay ? `<div class="text-[11px] text-gray-500 mt-1">到期日: ${escapeHtml(details.expiryDateDisplay)}</div>` : '';
+                    html += `
+                        <td class="px-4 py-2 text-gray-600 border-b border-gray-100 max-w-xs">
+                            <div class="inline-flex items-center px-2.5 py-1 rounded-full border text-xs font-semibold ${getExpiryBadgeClass(details ? details.statusKey : '')}">
+                                ${escapeHtml(statusLabel)}
+                            </div>
+                            ${expiryDateText}
+                        </td>
+                    `;
+                }
                 html += '</tr>';
             });
 
+            const visibleColumnCount = columns.length + (shouldShowExpiryColumn() ? 1 : 0);
             if (data.length > MAX_RENDER_ROWS) {
-                 html += `<tr><td colspan="${columns.length}" class="px-4 py-4 text-center text-gray-500 italic bg-gray-50">... Showing first ${MAX_RENDER_ROWS} rows. Apply filters to narrow down the data. ...</td></tr>`;
+                 html += `<tr><td colspan="${visibleColumnCount}" class="px-4 py-4 text-center text-gray-500 italic bg-gray-50">... Showing first ${MAX_RENDER_ROWS} rows. Apply filters to narrow down the data. ...</td></tr>`;
             } else if (data.length === 0) {
-                html += `<tr><td colspan="${columns.length}" class="px-4 py-8 text-center text-gray-500">No records match your criteria.</td></tr>`;
+                html += `<tr><td colspan="${visibleColumnCount}" class="px-4 py-8 text-center text-gray-500">No records match your criteria.</td></tr>`;
             }
 
             tableBody.innerHTML = html;
@@ -1080,6 +1320,7 @@
 
             updateSortUI();
             updateFilterUI();
+            buildTableHeaders();
             processDataAndRender();
         }
 
