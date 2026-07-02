@@ -157,6 +157,12 @@
                         <button id="exportViewCsvBtn" class="bg-white hover:bg-violet-50 text-violet-700 border border-violet-200 px-4 py-2 rounded-lg shadow-sm font-medium transition-colors">
                             匯出目前(已排序) CSV
                         </button>
+                        <button id="exportAllSortedExcelBtn" class="bg-white hover:bg-fuchsia-50 text-fuchsia-700 border border-fuchsia-200 px-4 py-2 rounded-lg shadow-sm font-medium transition-colors">
+                            匯出全部(已排序) Excel
+                        </button>
+                        <button id="exportAllSortedCsvBtn" class="bg-white hover:bg-fuchsia-50 text-fuchsia-700 border border-fuchsia-200 px-4 py-2 rounded-lg shadow-sm font-medium transition-colors">
+                            匯出全部(已排序) CSV
+                        </button>
                     </div>
                 </div>
                 <div id="expirySummary" class="hidden text-sm bg-white border border-amber-200 rounded-lg px-4 py-3 text-gray-700"></div>
@@ -276,6 +282,8 @@
         const exportActiveCsvBtn = document.getElementById('exportActiveCsvBtn');
         const exportViewExcelBtn = document.getElementById('exportViewExcelBtn');
         const exportViewCsvBtn = document.getElementById('exportViewCsvBtn');
+        const exportAllSortedExcelBtn = document.getElementById('exportAllSortedExcelBtn');
+        const exportAllSortedCsvBtn = document.getElementById('exportAllSortedCsvBtn');
         const expirySummary = document.getElementById('expirySummary');
 
         // Render limits to prevent browser crash on huge files
@@ -298,6 +306,8 @@
         exportActiveCsvBtn.addEventListener('click', () => exportNotExpiredData('csv'));
         exportViewExcelBtn.addEventListener('click', () => exportCurrentViewData('xlsx'));
         exportViewCsvBtn.addEventListener('click', () => exportCurrentViewData('csv'));
+        exportAllSortedExcelBtn.addEventListener('click', () => exportAllSortedData('xlsx'));
+        exportAllSortedCsvBtn.addEventListener('click', () => exportAllSortedData('csv'));
 
         function handleHeaderRowChange() {
             if (currentWorkbook && currentWorksheetName) {
@@ -1147,6 +1157,60 @@
             const filename = `current_view_sorted_${suffix}.${type}`;
             exportRowsToFile(rows, 'Current View', filename, type);
             showMessage(`已匯出目前畫面 ${rows.length.toLocaleString()} 個 item 去 ${filename}`);
+        }
+
+        function sortRowsByCurrentSorts(rows) {
+            const sorted = Array.isArray(rows) ? rows.slice() : [];
+            if (sorts.length === 0) return sorted;
+
+            sorted.sort((a, b) => {
+                for (let i = 0; i < sorts.length; i++) {
+                    const { col, dir } = sorts[i];
+
+                    let valA = a[col] !== undefined ? a[col] : '';
+                    let valB = b[col] !== undefined ? b[col] : '';
+
+                    const numA = Number(valA);
+                    const numB = Number(valB);
+
+                    if (!isNaN(numA) && !isNaN(numB) && valA !== '' && valB !== '') {
+                        if (numA < numB) return -1 * dir;
+                        if (numA > numB) return 1 * dir;
+                    } else {
+                        const strA = String(valA).toLowerCase();
+                        const strB = String(valB).toLowerCase();
+                        if (strA < strB) return -1 * dir;
+                        if (strA > strB) return 1 * dir;
+                    }
+                }
+                return 0;
+            });
+
+            return sorted;
+        }
+
+        function exportAllSortedData(type) {
+            if (!rawData || rawData.length === 0) {
+                showMessage('未有資料可以匯出。', true);
+                return;
+            }
+
+            const baseRows = expiryAnalysis.sourceData && Array.isArray(expiryAnalysis.sourceData) && expiryAnalysis.sourceData.length > 0
+                ? expiryAnalysis.sourceData
+                : rawData;
+
+            const sortedRows = sortRowsByCurrentSorts(baseRows);
+            const rows = buildExportRowsFromRows(sortedRows, null);
+
+            if (rows.length === 0) {
+                showMessage('目前冇 item 可以匯出。', true);
+                return;
+            }
+
+            const suffix = expiryAnalysis.targetDate ? expiryAnalysis.targetDate.replace(/[^0-9]/g, '') : 'all';
+            const filename = `all_items_sorted_${suffix}.${type}`;
+            exportRowsToFile(rows, 'All Items (Sorted)', filename, type);
+            showMessage(`已匯出全部(已排序) ${rows.length.toLocaleString()} 個 item 去 ${filename}`);
         }
 
         function processDataAndRender() {
