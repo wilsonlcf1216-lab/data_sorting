@@ -213,6 +213,7 @@
         let rawData = [];
         let processedData = []; // Stores the current filtered & sorted view for summarizing
         let columns = [];
+        let dateColumns = new Set();
         let filters = {}; // { columnName: 'search string' }
         let explicitExclusions = {}; // { columnName: Set(['ExcludedVal1', ...]) }
         let sorts = [];   // [ { col: 'columnName', dir: 1 (asc) or -1 (desc) } ]
@@ -375,6 +376,7 @@
                 explicitExclusions = {};
                 sorts = [];
                 resetExpiryAnalysis();
+                dateColumns = detectDateColumns(rawData, columns);
                 
                 buildTableHeaders();
                 populateExpiryColumnOptions();
@@ -616,6 +618,59 @@
 
             // Fallback to standard text matching
             return String(cellValue).toLowerCase().includes(filterVal);
+        }
+
+        function detectDateColumns(data, cols) {
+            const result = new Set();
+            const sampleLimit = Math.min(data.length, 200);
+
+            cols.forEach(col => {
+                let nonEmpty = 0;
+                let parsed = 0;
+
+                for (let i = 0; i < sampleLimit; i++) {
+                    const val = data[i][col];
+                    if (val == null) continue;
+                    const text = String(val).trim();
+                    if (!text) continue;
+                    nonEmpty += 1;
+                    if (parseFlexibleDate(text)) {
+                        parsed += 1;
+                    }
+                }
+
+                if (nonEmpty >= 5 && parsed / nonEmpty >= 0.6) {
+                    result.add(col);
+                }
+            });
+
+            return result;
+        }
+
+        function formatCellValueForDisplay(col, value) {
+            if (value == null) return '';
+            const text = String(value).trim();
+            if (!text) return '';
+
+            if (dateColumns.has(col)) {
+                const parsed = parseFlexibleDate(text);
+                if (parsed) return formatDateForDisplay(parsed);
+            }
+
+            return String(value);
+        }
+
+        function formatCellValueForExport(col, value) {
+            if (value == null) return '';
+            const text = String(value).trim();
+            if (!text) return '';
+
+            if (dateColumns.has(col)) {
+                const parsed = parseFlexibleDate(text);
+                if (parsed) return formatDateForDisplay(parsed);
+            }
+
+            return String(value);
         }
 
         function resetExpiryAnalysis() {
@@ -992,7 +1047,7 @@
                 .map(item => {
                     const exportRow = {};
                     columns.forEach(col => {
-                        exportRow[col] = item.row[col] !== undefined ? item.row[col] : '';
+                        exportRow[col] = formatCellValueForExport(col, item.row[col]);
                     });
                     exportRow['到期日'] = item.details.expiryDate ? formatDateForExport(item.details.expiryDate) : '';
                     exportRow['到期狀態'] = item.details.statusLabel;
@@ -1101,7 +1156,8 @@
                 html += '<tr class="hover:bg-blue-50 transition-colors">';
                 columns.forEach(col => {
                     const cellValue = row[col] !== undefined ? row[col] : '';
-                    html += `<td class="px-4 py-2 text-gray-600 border-b border-gray-100 max-w-xs truncate" title="${escapeHtml(String(cellValue))}">${escapeHtml(String(cellValue))}</td>`;
+                    const displayValue = formatCellValueForDisplay(col, cellValue);
+                    html += `<td class="px-4 py-2 text-gray-600 border-b border-gray-100 max-w-xs truncate" title="${escapeHtml(String(displayValue))}">${escapeHtml(String(displayValue))}</td>`;
                 });
                 if (shouldShowExpiryColumn()) {
                     const details = getExpiryDetails(row);
