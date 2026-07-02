@@ -1194,24 +1194,24 @@
 
             activeSummaryCol = col;
 
-            // Get data filtered by everything EXCEPT this column's own exclusions
-            // (Allows you to see what's excluded and toggle it back on)
-            let dataForSummary = rawData.filter(row => {
-                for (const [fCol, filterVal] of Object.entries(filters)) {
-                    if (!passesFilter(row, fCol, filterVal)) return false;
-                }
-                for (const [eCol, excludedSet] of Object.entries(explicitExclusions)) {
-                    if (eCol !== col && excludedSet && excludedSet.size > 0) {
-                        const cellValue = (row[eCol] !== undefined && String(row[eCol]).trim() !== '') ? String(row[eCol]) : '(Blank)';
-                        if (excludedSet.has(cellValue)) return false;
+            let dataForSummary = expiryAnalysis.sourceData && Array.isArray(expiryAnalysis.sourceData)
+                ? expiryAnalysis.sourceData
+                : rawData.filter(row => {
+                    for (const [fCol, filterVal] of Object.entries(filters)) {
+                        if (!passesFilter(row, fCol, filterVal)) return false;
                     }
-                }
-                if (shouldShowExpiryColumn() && expiryAnalysis.mode !== 'all') {
-                    const details = getExpiryDetails(row);
-                    if (!matchesExpiryMode(details)) return false;
-                }
-                return true;
-            });
+                    for (const [eCol, excludedSet] of Object.entries(explicitExclusions)) {
+                        if (excludedSet && excludedSet.size > 0) {
+                            const cellValue = (row[eCol] !== undefined && String(row[eCol]).trim() !== '') ? String(row[eCol]) : '(Blank)';
+                            if (excludedSet.has(cellValue)) return false;
+                        }
+                    }
+                    return true;
+                });
+
+            if (shouldShowExpiryColumn() && expiryAnalysis.mode !== 'all') {
+                dataForSummary = dataForSummary.filter(row => matchesExpiryMode(getExpiryDetails(row)));
+            }
 
             if (dataForSummary.length === 0) {
                 alert("No data available to summarize with your current filters.");
