@@ -145,6 +145,24 @@
                         <button id="exportExpiredCsvBtn" class="bg-white hover:bg-sky-50 text-sky-700 border border-sky-200 px-4 py-2 rounded-lg shadow-sm font-medium transition-colors">
                             匯出已過期 CSV
                         </button>
+                        <button id="exportActiveExcelBtn" class="bg-white hover:bg-emerald-50 text-emerald-700 border border-emerald-200 px-4 py-2 rounded-lg shadow-sm font-medium transition-colors">
+                            匯出未過期 Excel
+                        </button>
+                        <button id="exportActiveCsvBtn" class="bg-white hover:bg-emerald-50 text-emerald-700 border border-emerald-200 px-4 py-2 rounded-lg shadow-sm font-medium transition-colors">
+                            匯出未過期 CSV
+                        </button>
+                        <button id="exportViewExcelBtn" class="bg-white hover:bg-violet-50 text-violet-700 border border-violet-200 px-4 py-2 rounded-lg shadow-sm font-medium transition-colors">
+                            匯出目前(已排序) Excel
+                        </button>
+                        <button id="exportViewCsvBtn" class="bg-white hover:bg-violet-50 text-violet-700 border border-violet-200 px-4 py-2 rounded-lg shadow-sm font-medium transition-colors">
+                            匯出目前(已排序) CSV
+                        </button>
+                        <button id="exportAllSortedExcelBtn" class="bg-white hover:bg-fuchsia-50 text-fuchsia-700 border border-fuchsia-200 px-4 py-2 rounded-lg shadow-sm font-medium transition-colors">
+                            匯出全部(已排序) Excel
+                        </button>
+                        <button id="exportAllSortedCsvBtn" class="bg-white hover:bg-fuchsia-50 text-fuchsia-700 border border-fuchsia-200 px-4 py-2 rounded-lg shadow-sm font-medium transition-colors">
+                            匯出全部(已排序) CSV
+                        </button>
                     </div>
                 </div>
                 <div id="expirySummary" class="hidden text-sm bg-white border border-amber-200 rounded-lg px-4 py-3 text-gray-700"></div>
@@ -260,6 +278,12 @@
         const expiryUpcoming90Btn = document.getElementById('expiryUpcoming90Btn');
         const exportExpiredExcelBtn = document.getElementById('exportExpiredExcelBtn');
         const exportExpiredCsvBtn = document.getElementById('exportExpiredCsvBtn');
+        const exportActiveExcelBtn = document.getElementById('exportActiveExcelBtn');
+        const exportActiveCsvBtn = document.getElementById('exportActiveCsvBtn');
+        const exportViewExcelBtn = document.getElementById('exportViewExcelBtn');
+        const exportViewCsvBtn = document.getElementById('exportViewCsvBtn');
+        const exportAllSortedExcelBtn = document.getElementById('exportAllSortedExcelBtn');
+        const exportAllSortedCsvBtn = document.getElementById('exportAllSortedCsvBtn');
         const expirySummary = document.getElementById('expirySummary');
 
         // Render limits to prevent browser crash on huge files
@@ -278,6 +302,12 @@
         expiryUpcoming90Btn.addEventListener('click', () => setExpiryMode('upcoming90'));
         exportExpiredExcelBtn.addEventListener('click', () => exportExpiredData('xlsx'));
         exportExpiredCsvBtn.addEventListener('click', () => exportExpiredData('csv'));
+        exportActiveExcelBtn.addEventListener('click', () => exportNotExpiredData('xlsx'));
+        exportActiveCsvBtn.addEventListener('click', () => exportNotExpiredData('csv'));
+        exportViewExcelBtn.addEventListener('click', () => exportCurrentViewData('xlsx'));
+        exportViewCsvBtn.addEventListener('click', () => exportCurrentViewData('csv'));
+        exportAllSortedExcelBtn.addEventListener('click', () => exportAllSortedData('xlsx'));
+        exportAllSortedCsvBtn.addEventListener('click', () => exportAllSortedData('csv'));
 
         function handleHeaderRowChange() {
             if (currentWorkbook && currentWorksheetName) {
@@ -1038,21 +1068,41 @@
         }
 
         function buildExpiredExportRows() {
-            return expiryAnalysis.sourceData
+            return buildExportRowsFromRows(expiryAnalysis.sourceData, item => item.details && item.details.statusKey === 'expired');
+        }
+
+        function buildNotExpiredExportRows() {
+            return buildExportRowsFromRows(expiryAnalysis.sourceData, item => item.details && item.details.groupKey === 'active');
+        }
+
+        function buildExportRowsFromRows(rows, predicate) {
+            const list = Array.isArray(rows) ? rows : [];
+            return list
                 .map(row => {
-                    const details = getExpiryDetails(row);
+                    const details = shouldShowExpiryColumn() ? getExpiryDetails(row) : null;
                     return { row, details };
                 })
-                .filter(item => item.details && item.details.statusKey === 'expired')
+                .filter(item => (predicate ? predicate(item) : true))
                 .map(item => {
                     const exportRow = {};
                     columns.forEach(col => {
                         exportRow[col] = formatCellValueForExport(col, item.row[col]);
                     });
-                    exportRow['到期日'] = item.details.expiryDate ? formatDateForExport(item.details.expiryDate) : '';
-                    exportRow['到期狀態'] = item.details.statusLabel;
+
+                    if (shouldShowExpiryColumn()) {
+                        exportRow['到期日'] = item.details && item.details.expiryDate ? formatDateForExport(item.details.expiryDate) : '';
+                        exportRow['到期狀態'] = item.details ? item.details.statusLabel : '';
+                    }
+
                     return exportRow;
                 });
+        }
+
+        function exportRowsToFile(rows, sheetName, filename, type) {
+            const worksheet = XLSX.utils.json_to_sheet(rows);
+            const workbook = XLSX.utils.book_new();
+            XLSX.utils.book_append_sheet(workbook, worksheet, sheetName);
+            XLSX.writeFile(workbook, filename, type === 'csv' ? { bookType: 'csv' } : {});
         }
 
         function exportExpiredData(type) {
@@ -1067,14 +1117,100 @@
                 return;
             }
 
-            const worksheet = XLSX.utils.json_to_sheet(expiredRows);
-            const workbook = XLSX.utils.book_new();
-            XLSX.utils.book_append_sheet(workbook, worksheet, 'Expired Items');
-
             const safeDate = expiryAnalysis.targetDate.replace(/[^0-9]/g, '');
             const filename = `expired_items_${safeDate}.${type}`;
-            XLSX.writeFile(workbook, filename, type === 'csv' ? { bookType: 'csv' } : {});
+            exportRowsToFile(expiredRows, 'Expired Items', filename, type);
             showMessage(`已匯出 ${expiredRows.length.toLocaleString()} 個已過期 item 去 ${filename}`);
+        }
+
+        function exportNotExpiredData(type) {
+            if (!expiryAnalysis.dobColumn || !expiryAnalysis.targetDate) {
+                showMessage('請先做一次到期分析，先可以匯出未過期 item。', true);
+                return;
+            }
+
+            const rows = buildNotExpiredExportRows();
+            if (rows.length === 0) {
+                showMessage('目前篩選結果入面冇未過期 item 可以匯出。', true);
+                return;
+            }
+
+            const safeDate = expiryAnalysis.targetDate.replace(/[^0-9]/g, '');
+            const filename = `not_expired_items_${safeDate}.${type}`;
+            exportRowsToFile(rows, 'Not Expired Items', filename, type);
+            showMessage(`已匯出 ${rows.length.toLocaleString()} 個未過期 item 去 ${filename}`);
+        }
+
+        function exportCurrentViewData(type) {
+            if (!rawData || rawData.length === 0) {
+                showMessage('未有資料可以匯出。', true);
+                return;
+            }
+
+            const rows = buildExportRowsFromRows(processedData, null);
+            if (rows.length === 0) {
+                showMessage('目前畫面冇 item 可以匯出。', true);
+                return;
+            }
+
+            const suffix = expiryAnalysis.targetDate ? expiryAnalysis.targetDate.replace(/[^0-9]/g, '') : 'view';
+            const filename = `current_view_sorted_${suffix}.${type}`;
+            exportRowsToFile(rows, 'Current View', filename, type);
+            showMessage(`已匯出目前畫面 ${rows.length.toLocaleString()} 個 item 去 ${filename}`);
+        }
+
+        function sortRowsByCurrentSorts(rows) {
+            const sorted = Array.isArray(rows) ? rows.slice() : [];
+            if (sorts.length === 0) return sorted;
+
+            sorted.sort((a, b) => {
+                for (let i = 0; i < sorts.length; i++) {
+                    const { col, dir } = sorts[i];
+
+                    let valA = a[col] !== undefined ? a[col] : '';
+                    let valB = b[col] !== undefined ? b[col] : '';
+
+                    const numA = Number(valA);
+                    const numB = Number(valB);
+
+                    if (!isNaN(numA) && !isNaN(numB) && valA !== '' && valB !== '') {
+                        if (numA < numB) return -1 * dir;
+                        if (numA > numB) return 1 * dir;
+                    } else {
+                        const strA = String(valA).toLowerCase();
+                        const strB = String(valB).toLowerCase();
+                        if (strA < strB) return -1 * dir;
+                        if (strA > strB) return 1 * dir;
+                    }
+                }
+                return 0;
+            });
+
+            return sorted;
+        }
+
+        function exportAllSortedData(type) {
+            if (!rawData || rawData.length === 0) {
+                showMessage('未有資料可以匯出。', true);
+                return;
+            }
+
+            const baseRows = expiryAnalysis.sourceData && Array.isArray(expiryAnalysis.sourceData) && expiryAnalysis.sourceData.length > 0
+                ? expiryAnalysis.sourceData
+                : rawData;
+
+            const sortedRows = sortRowsByCurrentSorts(baseRows);
+            const rows = buildExportRowsFromRows(sortedRows, null);
+
+            if (rows.length === 0) {
+                showMessage('目前冇 item 可以匯出。', true);
+                return;
+            }
+
+            const suffix = expiryAnalysis.targetDate ? expiryAnalysis.targetDate.replace(/[^0-9]/g, '') : 'all';
+            const filename = `all_items_sorted_${suffix}.${type}`;
+            exportRowsToFile(rows, 'All Items (Sorted)', filename, type);
+            showMessage(`已匯出全部(已排序) ${rows.length.toLocaleString()} 個 item 去 ${filename}`);
         }
 
         function processDataAndRender() {
